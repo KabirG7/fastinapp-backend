@@ -41,7 +41,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // MongoDB connection with better error handling
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://mongo:WUMdxkOIsKhXSHCoQtfMplBesCmYTmYS@tramway.proxy.rlwy.net:35416';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://MoviesUser:123@maincluster.da70ufc.mongodb.net/fasting?retryWrites=true&w=majority';
 
 console.log('🔗 Connecting to MongoDB...');
 mongoose.connect(MONGODB_URI, {
