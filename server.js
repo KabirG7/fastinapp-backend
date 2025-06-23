@@ -14,17 +14,29 @@ console.log('📡 Port:', PORT);
 console.log('🔐 JWT Secret exists:', !!JWT_SECRET);
 console.log('🌍 Environment:', process.env.NODE_ENV || 'development');
 
-// CORS Configuration - Fixed for Railway
+// CORS Configuration - Railway Fix
 app.use(cors({
-  origin: [
-    'https://fastinapp-frontend-production.up.railway.app',
-    'http://localhost:3000',
-    'http://localhost:5173'
-  ],
+  origin: true, // Allow all origins temporarily
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Access-Control-Allow-Origin'],
+  preflightContinue: false,
+  optionsSuccessStatus: 200
 }));
+
+// Additional CORS headers middleware
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin);
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin,X-Requested-With,Content-Type,Accept,Authorization');
+  
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
+});
 
 app.use(express.json());
 
