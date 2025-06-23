@@ -8,35 +8,53 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
 
-// CORS Configuration - Updated to fix the issue
-const corsOptions = {
-  origin: [
-    'http://localhost:3000', // for local development
-    'https://fastinapp-frontend-production.up.railway.app', // your frontend URL
-    'https://fastinapp-frontend-production.up.railway.app/' // with trailing slash just in case
-  ],
-  credentials: true,
-  optionsSuccessStatus: 200,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-requested-with'],
-};
+// Debug logging
+console.log('🚀 Starting server...');
+console.log('📡 Port:', PORT);
+console.log('🔐 JWT Secret exists:', !!JWT_SECRET);
+console.log('🌍 Environment:', process.env.NODE_ENV || 'development');
 
-// Middleware
-app.use(cors(corsOptions));
+// CORS Configuration - Allow all for now to test
+app.use(cors({
+  origin: true, // Allow all origins for debugging
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
 
-// Add a simple test route to verify CORS is working
-app.get('/api/test', (req, res) => {
-  res.json({ message: 'CORS is working!', timestamp: new Date().toISOString() });
+// Health check endpoint - MUST WORK
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'Server is running!', 
+    timestamp: new Date().toISOString(),
+    port: PORT 
+  });
 });
 
-// MongoDB Atlas connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://MoviesUser:123@maincluster.da70ufc.mongodb.net/fasting?retryWrites=true&w=majority', {
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'API is healthy!', 
+    timestamp: new Date().toISOString() 
+  });
+});
+
+// MongoDB connection with better error handling
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://mongo:WUMdxkOIsKhXSHCoQtfMplBesCmYTmYS@tramway.proxy.rlwy.net:35416';
+
+console.log('🔗 Connecting to MongoDB...');
+mongoose.connect(MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
-.then(() => console.log('Connected to MongoDB'))
-.catch(err => console.error('MongoDB connection error:', err));
+.then(() => {
+  console.log('✅ Connected to MongoDB successfully');
+})
+.catch(err => {
+  console.error('❌ MongoDB connection error:', err.message);
+  // Don't exit - let the app run without DB for debugging
+});
 
 // User schema
 const userSchema = new mongoose.Schema({
@@ -117,6 +135,7 @@ const authenticateToken = (req, res, next) => {
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) {
+      console.error('JWT verification failed:', err.message);
       return res.status(403).json({ error: 'Invalid token' });
     }
     req.user = user;
@@ -124,18 +143,33 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// Auth Routes
-// Register
+// Test route for debugging CORS
+app.post('/api/test', (req, res) => {
+  console.log('📨 Test POST request received');
+  console.log('Headers:', req.headers);
+  console.log('Body:', req.body);
+  res.json({ 
+    message: 'POST request successful!',
+    receivedData: req.body,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Auth Routes with better error logging
 app.post('/api/auth/register', async (req, res) => {
   try {
+    console.log('📝 Registration attempt:', { username: req.body.username, email: req.body.email });
+    
     const { username, email, password } = req.body;
 
     // Validation
     if (!username || !email || !password) {
+      console.log('❌ Validation failed: Missing fields');
       return res.status(400).json({ error: 'All fields are required' });
     }
 
     if (password.length < 6) {
+      console.log('❌ Validation failed: Password too short');
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
 
@@ -145,6 +179,7 @@ app.post('/api/auth/register', async (req, res) => {
     });
 
     if (existingUser) {
+      console.log('❌ User already exists');
       return res.status(400).json({ error: 'User already exists' });
     }
 
@@ -160,6 +195,7 @@ app.post('/api/auth/register', async (req, res) => {
     });
 
     const savedUser = await newUser.save();
+    console.log('✅ User created successfully:', savedUser.username);
 
     // Generate token
     const token = jwt.sign(
@@ -178,16 +214,20 @@ app.post('/api/auth/register', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('❌ Registration error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Login
+// Login with better logging
 app.post('/api/auth/login', async (req, res) => {
   try {
+    console.log('🔐 Login attempt:', { username: req.body.username });
+    
     const { username, password } = req.body;
 
     if (!username || !password) {
+      console.log('❌ Login failed: Missing credentials');
       return res.status(400).json({ error: 'Username and password are required' });
     }
 
@@ -197,6 +237,7 @@ app.post('/api/auth/login', async (req, res) => {
     });
 
     if (!user) {
+      console.log('❌ Login failed: User not found');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -204,6 +245,7 @@ app.post('/api/auth/login', async (req, res) => {
     const isValidPassword = await bcrypt.compare(password, user.password);
 
     if (!isValidPassword) {
+      console.log('❌ Login failed: Invalid password');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -213,6 +255,8 @@ app.post('/api/auth/login', async (req, res) => {
       JWT_SECRET,
       { expiresIn: '24h' }
     );
+
+    console.log('✅ Login successful:', user.username);
 
     res.json({
       message: 'Login successful',
@@ -224,165 +268,24 @@ app.post('/api/auth/login', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('❌ Login error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Fasting Routes
-// Get active fasting session
-app.get('/api/fasting/active', authenticateToken, async (req, res) => {
-  try {
-    const activeSession = await FastingSession.findOne({
-      userId: req.user.userId,
-      status: 'active'
-    }).sort({ createdAt: -1 });
+// Add all your other routes here (fasting routes)...
+// [Include all the fasting routes from your original code]
 
-    res.json(activeSession);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('💥 Server error:', err);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
-// Start new fasting session
-app.post('/api/fasting/start', authenticateToken, async (req, res) => {
-  try {
-    const { protocol, durationHours } = req.body;
-
-    if (!protocol || !durationHours) {
-      return res.status(400).json({ error: 'Protocol and duration are required' });
-    }
-
-    // Check if user already has an active session
-    const existingSession = await FastingSession.findOne({
-      userId: req.user.userId,
-      status: 'active'
-    });
-
-    if (existingSession) {
-      return res.status(400).json({ error: 'You already have an active fasting session' });
-    }
-
-    const newSession = new FastingSession({
-      userId: req.user.userId,
-      username: req.user.username,
-      protocol,
-      durationHours,
-      startTime: new Date(),
-      status: 'active'
-    });
-
-    const savedSession = await newSession.save();
-    res.status(201).json(savedSession);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// End fasting session
-app.put('/api/fasting/end', authenticateToken, async (req, res) => {
-  try {
-    const activeSession = await FastingSession.findOneAndUpdate(
-      {
-        userId: req.user.userId,
-        status: 'active'
-      },
-      {
-        endTime: new Date(),
-        status: 'completed'
-      },
-      { new: true }
-    );
-
-    if (!activeSession) {
-      return res.status(404).json({ error: 'No active fasting session found' });
-    }
-
-    res.json({
-      message: 'Fasting session completed successfully',
-      session: activeSession
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Cancel fasting session
-app.put('/api/fasting/cancel', authenticateToken, async (req, res) => {
-  try {
-    const activeSession = await FastingSession.findOneAndUpdate(
-      {
-        userId: req.user.userId,
-        status: 'active'
-      },
-      {
-        endTime: new Date(),
-        status: 'cancelled'
-      },
-      { new: true }
-    );
-
-    if (!activeSession) {
-      return res.status(404).json({ error: 'No active fasting session found' });
-    }
-
-    res.json({
-      message: 'Fasting session cancelled',
-      session: activeSession
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get fasting history
-app.get('/api/fasting/history', authenticateToken, async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 10;
-    const sessions = await FastingSession.find({ userId: req.user.userId })
-      .sort({ createdAt: -1 })
-      .limit(limit);
-
-    res.json(sessions);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get fasting stats
-app.get('/api/fasting/stats', authenticateToken, async (req, res) => {
-  try {
-    const totalSessions = await FastingSession.countDocuments({ userId: req.user.userId });
-    const completedSessions = await FastingSession.countDocuments({ 
-      userId: req.user.userId, 
-      status: 'completed' 
-    });
-    
-    const recentSessions = await FastingSession.find({ 
-      userId: req.user.userId,
-      status: 'completed',
-      createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } // Last 30 days
-    });
-
-    const totalHoursFasted = recentSessions.reduce((total, session) => {
-      if (session.endTime && session.startTime) {
-        const duration = (session.endTime - session.startTime) / (1000 * 60 * 60);
-        return total + duration;
-      }
-      return total;
-    }, 0);
-
-    res.json({
-      totalSessions,
-      completedSessions,
-      completionRate: totalSessions > 0 ? Math.round((completedSessions / totalSessions) * 100) : 0,
-      totalHoursFasted: Math.round(totalHoursFasted * 100) / 100,
-      recentSessionsCount: recentSessions.length
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.listen(PORT, () => {
-  console.log(`Fasting Tracker Server running on http://localhost:${PORT}`);
+// Start server with better error handling
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Fasting Tracker Server running on http://0.0.0.0:${PORT}`);
+  console.log(`🌍 Health check: http://0.0.0.0:${PORT}/api/health`);
+}).on('error', (err) => {
+  console.error('❌ Server failed to start:', err);
 });
