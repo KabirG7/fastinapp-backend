@@ -13,7 +13,7 @@ app.use(cors());
 app.use(express.json());
 
 // MongoDB Atlas connection
-mongoose.connect('mongodb://mongo:WUMdxkOIsKhXSHCoQtfMplBesCmYTmYS@tramway.proxy.rlwy.net:35416', {
+mongoose.connect('mongodb+srv://MoviesUser:123@maincluster.da70ufc.mongodb.net/fasting?retryWrites=true&w=majority', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
