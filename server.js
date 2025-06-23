@@ -14,29 +14,47 @@ console.log('📡 Port:', PORT);
 console.log('🔐 JWT Secret exists:', !!JWT_SECRET);
 console.log('🌍 Environment:', process.env.NODE_ENV || 'development');
 
-// CORS Configuration - Railway Fix
-app.use(cors({
-  origin: true, // Allow all origins temporarily
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Access-Control-Allow-Origin'],
-  preflightContinue: false,
-  optionsSuccessStatus: 200
-}));
-
-// Additional CORS headers middleware
+// CORS Configuration - Aggressive Fix for Railway
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin);
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'https://fastinapp-frontend-production.up.railway.app',
+    'http://localhost:3000',
+    'http://localhost:5173'
+  ];
+  
+  if (allowedOrigins.includes(origin) || !origin) {
+    res.header('Access-Control-Allow-Origin', origin || '*');
+  }
+  
   res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin,X-Requested-With,Content-Type,Accept,Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS,PATCH');
+  res.header('Access-Control-Allow-Headers', 'Origin,X-Requested-With,Content-Type,Accept,Authorization,Cache-Control');
+  res.header('Access-Control-Max-Age', '86400');
   
   if (req.method === 'OPTIONS') {
-    res.sendStatus(200);
-  } else {
-    next();
+    return res.status(200).end();
   }
+  next();
 });
+
+// Backup CORS with library
+app.use(cors({
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      'https://fastinapp-frontend-production.up.railway.app',
+      'http://localhost:3000',
+      'http://localhost:5173'
+    ];
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Allow all for now
+    }
+  },
+  credentials: true,
+  optionsSuccessStatus: 200
+}));
 
 app.use(express.json());
 
