@@ -14,9 +14,13 @@ console.log('📡 Port:', PORT);
 console.log('🔐 JWT Secret exists:', !!JWT_SECRET);
 console.log('🌍 Environment:', process.env.NODE_ENV || 'development');
 
-// CORS Configuration - Allow all for now to test
+// CORS Configuration - Fixed for Railway
 app.use(cors({
-  origin: true, // Allow all origins for debugging
+  origin: [
+    'https://fastinapp-frontend-production.up.railway.app',
+    'http://localhost:3000',
+    'http://localhost:5173'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -24,7 +28,7 @@ app.use(cors({
 
 app.use(express.json());
 
-// Health check endpoint - MUST WORK
+// Health check endpoint
 app.get('/', (req, res) => {
   res.json({ 
     status: 'Server is running!', 
@@ -36,7 +40,8 @@ app.get('/', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'API is healthy!', 
-    timestamp: new Date().toISOString() 
+    timestamp: new Date().toISOString(),
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
   });
 });
 
@@ -47,13 +52,24 @@ console.log('🔗 Connecting to MongoDB...');
 mongoose.connect(MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
+  maxPoolSize: 10,
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
 })
 .then(() => {
   console.log('✅ Connected to MongoDB successfully');
 })
 .catch(err => {
   console.error('❌ MongoDB connection error:', err.message);
-  // Don't exit - let the app run without DB for debugging
+});
+
+// Handle MongoDB connection errors after initial connection
+mongoose.connection.on('error', (err) => {
+  console.error('❌ MongoDB connection error:', err.message);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.log('⚠️ MongoDB disconnected');
 });
 
 // User schema
@@ -143,51 +159,40 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// Test route for debugging CORS
+// Test route for debugging
 app.post('/api/test', (req, res) => {
   console.log('📨 Test POST request received');
-  console.log('Headers:', req.headers);
-  console.log('Body:', req.body);
   res.json({ 
     message: 'POST request successful!',
-    receivedData: req.body,
     timestamp: new Date().toISOString()
   });
 });
 
-// Auth Routes with better error logging
+// Auth Routes
 app.post('/api/auth/register', async (req, res) => {
   try {
     console.log('📝 Registration attempt:', { username: req.body.username, email: req.body.email });
     
     const { username, email, password } = req.body;
 
-    // Validation
     if (!username || !email || !password) {
-      console.log('❌ Validation failed: Missing fields');
       return res.status(400).json({ error: 'All fields are required' });
     }
 
     if (password.length < 6) {
-      console.log('❌ Validation failed: Password too short');
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
 
-    // Check if user already exists
     const existingUser = await User.findOne({ 
       $or: [{ email }, { username }] 
     });
 
     if (existingUser) {
-      console.log('❌ User already exists');
       return res.status(400).json({ error: 'User already exists' });
     }
 
-    // Hash password
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create user
     const newUser = new User({
       username,
       email,
@@ -197,7 +202,6 @@ app.post('/api/auth/register', async (req, res) => {
     const savedUser = await newUser.save();
     console.log('✅ User created successfully:', savedUser.username);
 
-    // Generate token
     const token = jwt.sign(
       { userId: savedUser._id, username: savedUser.username },
       JWT_SECRET,
@@ -219,7 +223,6 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-// Login with better logging
 app.post('/api/auth/login', async (req, res) => {
   try {
     console.log('🔐 Login attempt:', { username: req.body.username });
@@ -227,29 +230,23 @@ app.post('/api/auth/login', async (req, res) => {
     const { username, password } = req.body;
 
     if (!username || !password) {
-      console.log('❌ Login failed: Missing credentials');
       return res.status(400).json({ error: 'Username and password are required' });
     }
 
-    // Find user
     const user = await User.findOne({ 
       $or: [{ username }, { email: username }] 
     });
 
     if (!user) {
-      console.log('❌ Login failed: User not found');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Check password
     const isValidPassword = await bcrypt.compare(password, user.password);
 
     if (!isValidPassword) {
-      console.log('❌ Login failed: Invalid password');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Generate token
     const token = jwt.sign(
       { userId: user._id, username: user.username },
       JWT_SECRET,
@@ -273,8 +270,164 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Add all your other routes here (fasting routes)...
-// [Include all the fasting routes from your original code]
+// Fasting Routes
+app.get('/api/fasting/sessions', authenticateToken, async (req, res) => {
+  try {
+    console.log('📊 Fetching fasting sessions for user:', req.user.username);
+    
+    const sessions = await FastingSession.find({ userId: req.user.userId })
+      .sort({ createdAt: -1 })
+      .limit(10);
+    
+    console.log('✅ Found', sessions.length, 'sessions');
+    res.json(sessions);
+  } catch (error) {
+    console.error('❌ Error fetching sessions:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/fasting/start', authenticateToken, async (req, res) => {
+  try {
+    console.log('🏁 Starting new fasting session for:', req.user.username);
+    
+    const { protocol, durationHours } = req.body;
+    
+    if (!protocol || !durationHours) {
+      return res.status(400).json({ error: 'Protocol and duration are required' });
+    }
+
+    const activeSession = await FastingSession.findOne({
+      userId: req.user.userId,
+      status: 'active'
+    });
+
+    if (activeSession) {
+      return res.status(400).json({ error: 'You already have an active fasting session' });
+    }
+
+    const newSession = new FastingSession({
+      userId: req.user.userId,
+      username: req.user.username,
+      protocol,
+      durationHours,
+      startTime: new Date(),
+      status: 'active'
+    });
+
+    const savedSession = await newSession.save();
+    console.log('✅ Fasting session started:', savedSession._id);
+    
+    res.status(201).json(savedSession);
+  } catch (error) {
+    console.error('❌ Error starting fasting session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/fasting/current', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔍 Getting current session for:', req.user.username);
+    
+    const activeSession = await FastingSession.findOne({
+      userId: req.user.userId,
+      status: 'active'
+    });
+
+    if (!activeSession) {
+      return res.json({ message: 'No active fasting session' });
+    }
+
+    res.json(activeSession);
+  } catch (error) {
+    console.error('❌ Error fetching current session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/fasting/end/:sessionId', authenticateToken, async (req, res) => {
+  try {
+    console.log('🏁 Ending fasting session:', req.params.sessionId);
+    
+    const session = await FastingSession.findOne({
+      _id: req.params.sessionId,
+      userId: req.user.userId,
+      status: 'active'
+    });
+
+    if (!session) {
+      return res.status(404).json({ error: 'Active session not found' });
+    }
+
+    session.endTime = new Date();
+    session.status = 'completed';
+    
+    const updatedSession = await session.save();
+    console.log('✅ Session completed:', updatedSession._id);
+    
+    res.json(updatedSession);
+  } catch (error) {
+    console.error('❌ Error ending session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/fasting/cancel/:sessionId', authenticateToken, async (req, res) => {
+  try {
+    console.log('❌ Cancelling fasting session:', req.params.sessionId);
+    
+    const session = await FastingSession.findOne({
+      _id: req.params.sessionId,
+      userId: req.user.userId,
+      status: 'active'
+    });
+
+    if (!session) {
+      return res.status(404).json({ error: 'Active session not found' });
+    }
+
+    session.status = 'cancelled';
+    
+    const updatedSession = await session.save();
+    console.log('✅ Session cancelled:', updatedSession._id);
+    
+    res.json(updatedSession);
+  } catch (error) {
+    console.error('❌ Error cancelling session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get user stats
+app.get('/api/fasting/stats', authenticateToken, async (req, res) => {
+  try {
+    console.log('📈 Getting stats for:', req.user.username);
+    
+    const completedSessions = await FastingSession.find({
+      userId: req.user.userId,
+      status: 'completed'
+    });
+
+    const totalSessions = completedSessions.length;
+    const totalHours = completedSessions.reduce((sum, session) => {
+      return sum + session.durationHours;
+    }, 0);
+
+    const stats = {
+      totalSessions,
+      totalHours,
+      averageHours: totalSessions > 0 ? Math.round(totalHours / totalSessions) : 0,
+      longestFast: completedSessions.length > 0 
+        ? Math.max(...completedSessions.map(s => s.durationHours)) 
+        : 0
+    };
+
+    res.json(stats);
+  } catch (error) {
+    console.error('❌ Error fetching stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -282,7 +435,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Start server with better error handling
+// Start server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Fasting Tracker Server running on http://0.0.0.0:${PORT}`);
   console.log(`🌍 Health check: http://0.0.0.0:${PORT}/api/health`);
