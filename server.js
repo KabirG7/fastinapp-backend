@@ -301,18 +301,80 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // Fasting Routes
+
+// Get all fasting sessions (for history)
 app.get('/api/fasting/sessions', authenticateToken, async (req, res) => {
   try {
     console.log('📊 Fetching fasting sessions for user:', req.user.username);
     
     const sessions = await FastingSession.find({ userId: req.user.userId })
       .sort({ createdAt: -1 })
-      .limit(10);
+      .limit(50); // Increased limit for better history
     
     console.log('✅ Found', sessions.length, 'sessions');
     res.json(sessions);
   } catch (error) {
     console.error('❌ Error fetching sessions:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// FIXED: Add the missing /fasting/history endpoint that frontend expects
+app.get('/api/fasting/history', authenticateToken, async (req, res) => {
+  try {
+    console.log('📊 Fetching fasting history for user:', req.user.username);
+    
+    const sessions = await FastingSession.find({ userId: req.user.userId })
+      .sort({ createdAt: -1 })
+      .limit(100); // Get more history for the calendar view
+    
+    console.log('✅ Found', sessions.length, 'history sessions');
+    res.json(sessions);
+  } catch (error) {
+    console.error('❌ Error fetching history:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// FIXED: Add the missing /fasting/active endpoint that frontend expects
+app.get('/api/fasting/active', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔍 Getting active session for:', req.user.username);
+    
+    const activeSession = await FastingSession.findOne({
+      userId: req.user.userId,
+      status: 'active'
+    });
+
+    if (!activeSession) {
+      return res.status(404).json({ error: 'No active fasting session' });
+    }
+
+    console.log('✅ Found active session:', activeSession._id);
+    res.json(activeSession);
+  } catch (error) {
+    console.error('❌ Error fetching active session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Keep the existing /current endpoint for backward compatibility
+app.get('/api/fasting/current', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔍 Getting current session for:', req.user.username);
+    
+    const activeSession = await FastingSession.findOne({
+      userId: req.user.userId,
+      status: 'active'
+    });
+
+    if (!activeSession) {
+      return res.json({ message: 'No active fasting session' });
+    }
+
+    res.json(activeSession);
+  } catch (error) {
+    console.error('❌ Error fetching current session:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -355,26 +417,37 @@ app.post('/api/fasting/start', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/fasting/current', authenticateToken, async (req, res) => {
+// FIXED: Add the /fasting/end endpoint that frontend expects (without requiring sessionId)
+app.put('/api/fasting/end', authenticateToken, async (req, res) => {
   try {
-    console.log('🔍 Getting current session for:', req.user.username);
+    console.log('🏁 Ending active fasting session for:', req.user.username);
     
-    const activeSession = await FastingSession.findOne({
+    const session = await FastingSession.findOne({
       userId: req.user.userId,
       status: 'active'
     });
 
-    if (!activeSession) {
-      return res.json({ message: 'No active fasting session' });
+    if (!session) {
+      return res.status(404).json({ error: 'No active fasting session found' });
     }
 
-    res.json(activeSession);
+    session.endTime = new Date();
+    session.status = 'completed';
+    
+    const updatedSession = await session.save();
+    console.log('✅ Session completed:', updatedSession._id);
+    
+    res.json({ 
+      message: 'Fasting session completed successfully',
+      session: updatedSession 
+    });
   } catch (error) {
-    console.error('❌ Error fetching current session:', error);
+    console.error('❌ Error ending session:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
+// Keep the existing endpoint with sessionId for backward compatibility
 app.put('/api/fasting/end/:sessionId', authenticateToken, async (req, res) => {
   try {
     console.log('🏁 Ending fasting session:', req.params.sessionId);
@@ -402,6 +475,67 @@ app.put('/api/fasting/end/:sessionId', authenticateToken, async (req, res) => {
   }
 });
 
+// FIXED: Add the /fasting/cancel endpoint that frontend expects (with PUT and POST methods)
+app.put('/api/fasting/cancel', authenticateToken, async (req, res) => {
+  try {
+    console.log('❌ Cancelling active fasting session for:', req.user.username);
+    
+    const session = await FastingSession.findOne({
+      userId: req.user.userId,
+      status: 'active'
+    });
+
+    if (!session) {
+      return res.status(404).json({ error: 'No active fasting session found' });
+    }
+
+    session.status = 'cancelled';
+    session.endTime = new Date(); // Mark when it was cancelled
+    
+    const updatedSession = await session.save();
+    console.log('✅ Session cancelled:', updatedSession._id);
+    
+    res.json({ 
+      message: 'Fasting session cancelled successfully',
+      session: updatedSession 
+    });
+  } catch (error) {
+    console.error('❌ Error cancelling session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Also support POST method for cancel (frontend tries both)
+app.post('/api/fasting/cancel', authenticateToken, async (req, res) => {
+  try {
+    console.log('❌ Cancelling active fasting session for:', req.user.username, '(POST method)');
+    
+    const session = await FastingSession.findOne({
+      userId: req.user.userId,
+      status: 'active'
+    });
+
+    if (!session) {
+      return res.status(404).json({ error: 'No active fasting session found' });
+    }
+
+    session.status = 'cancelled';
+    session.endTime = new Date();
+    
+    const updatedSession = await session.save();
+    console.log('✅ Session cancelled:', updatedSession._id);
+    
+    res.json({ 
+      message: 'Fasting session cancelled successfully',
+      session: updatedSession 
+    });
+  } catch (error) {
+    console.error('❌ Error cancelling session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Keep the existing endpoint with sessionId for backward compatibility
 app.delete('/api/fasting/cancel/:sessionId', authenticateToken, async (req, res) => {
   try {
     console.log('❌ Cancelling fasting session:', req.params.sessionId);
@@ -417,6 +551,7 @@ app.delete('/api/fasting/cancel/:sessionId', authenticateToken, async (req, res)
     }
 
     session.status = 'cancelled';
+    session.endTime = new Date();
     
     const updatedSession = await session.save();
     console.log('✅ Session cancelled:', updatedSession._id);
@@ -428,34 +563,63 @@ app.delete('/api/fasting/cancel/:sessionId', authenticateToken, async (req, res)
   }
 });
 
-// Get user stats
+// FIXED: Improved stats calculation
 app.get('/api/fasting/stats', authenticateToken, async (req, res) => {
   try {
     console.log('📈 Getting stats for:', req.user.username);
     
-    const completedSessions = await FastingSession.find({
+    // Get all sessions from the last 30 days
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const allSessions = await FastingSession.find({
       userId: req.user.userId,
-      status: 'completed'
+      createdAt: { $gte: thirtyDaysAgo }
     });
 
-    const totalSessions = completedSessions.length;
-    const totalHours = completedSessions.reduce((sum, session) => {
-      return sum + session.durationHours;
+    const completedSessions = allSessions.filter(session => session.status === 'completed');
+    const totalSessions = allSessions.length;
+
+    // Calculate total hours fasted (only completed sessions)
+    const totalHoursFasted = completedSessions.reduce((sum, session) => {
+      if (session.endTime && session.startTime) {
+        const actualHours = (new Date(session.endTime) - new Date(session.startTime)) / (1000 * 60 * 60);
+        return sum + actualHours;
+      }
+      return sum;
     }, 0);
 
+    // Calculate completion rate
+    const completionRate = totalSessions > 0 ? Math.round((completedSessions.length / totalSessions) * 100) : 0;
+
     const stats = {
-      totalSessions,
-      totalHours,
-      averageHours: totalSessions > 0 ? Math.round(totalHours / totalSessions) : 0,
+      completedSessions: completedSessions.length,
+      totalSessions: totalSessions,
+      completionRate: completionRate,
+      totalHoursFasted: Math.round(totalHoursFasted),
+      averageHours: completedSessions.length > 0 ? Math.round(totalHoursFasted / completedSessions.length) : 0,
       longestFast: completedSessions.length > 0 
-        ? Math.max(...completedSessions.map(s => s.durationHours)) 
+        ? Math.max(...completedSessions.map(s => {
+            if (s.endTime && s.startTime) {
+              return (new Date(s.endTime) - new Date(s.startTime)) / (1000 * 60 * 60);
+            }
+            return 0;
+          }))
         : 0
     };
 
+    console.log('✅ Stats calculated:', stats);
     res.json(stats);
   } catch (error) {
     console.error('❌ Error fetching stats:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: error.message,
+      // Return default stats on error
+      completedSessions: 0,
+      totalSessions: 0,
+      completionRate: 0,
+      totalHoursFasted: 0
+    });
   }
 });
 
@@ -465,10 +629,31 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+// 404 handler for undefined routes
+app.use('*', (req, res) => {
+  console.log('❓ 404 - Route not found:', req.method, req.originalUrl);
+  res.status(404).json({ 
+    error: 'Route not found',
+    method: req.method,
+    path: req.originalUrl,
+    message: 'The requested endpoint does not exist'
+  });
+});
+
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Fasting Tracker Server running on http://0.0.0.0:${PORT}`);
   console.log(`🌍 Health check: http://0.0.0.0:${PORT}/api/health`);
+  console.log('📋 Available endpoints:');
+  console.log('  POST /api/auth/register');
+  console.log('  POST /api/auth/login');
+  console.log('  GET  /api/fasting/active');
+  console.log('  GET  /api/fasting/history');
+  console.log('  GET  /api/fasting/stats');
+  console.log('  POST /api/fasting/start');
+  console.log('  PUT  /api/fasting/end');
+  console.log('  PUT  /api/fasting/cancel');
+  console.log('  POST /api/fasting/cancel');
 }).on('error', (err) => {
   console.error('❌ Server failed to start:', err);
 });
