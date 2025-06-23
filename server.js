@@ -6,14 +6,32 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const JWT_SECRET = 'your-secret-key-change-this-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
+
+// CORS Configuration - Updated to fix the issue
+const corsOptions = {
+  origin: [
+    'http://localhost:3000', // for local development
+    'https://fastinapp-frontend-production.up.railway.app', // your frontend URL
+    'https://fastinapp-frontend-production.up.railway.app/' // with trailing slash just in case
+  ],
+  credentials: true,
+  optionsSuccessStatus: 200,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-requested-with'],
+};
 
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 
+// Add a simple test route to verify CORS is working
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'CORS is working!', timestamp: new Date().toISOString() });
+});
+
 // MongoDB Atlas connection
-mongoose.connect('mongodb+srv://MoviesUser:123@maincluster.da70ufc.mongodb.net/fasting?retryWrites=true&w=majority', {
+mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://MoviesUser:123@maincluster.da70ufc.mongodb.net/fasting?retryWrites=true&w=majority', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
